@@ -2,13 +2,6 @@
 
 Projeto acadêmico desenvolvido para a disciplina de **Internet das Coisas (IoT)**, com o objetivo de implementar um sistema de controle de acesso remoto utilizando ESP32, comunicação MQTT e registro de eventos.
 
-## 👨‍💻 Integrantes
-
-- Andrey Roberto Pinheiro
-- Winicius Santos Loebens
-
-**Data:** 15 de novembro de 2026
-
 ---
 
 ## 📌 Sobre o Projeto
