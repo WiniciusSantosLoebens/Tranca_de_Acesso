@@ -1,0 +1,133 @@
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ESP32Servo.h>
+#include <ArduinoJson.h>
+
+// --- CONFIGURAÇÕES DE REDE E MQTT ---
+const char* ssid = "Wokwi-GUEST";
+const char* password = "";
+const char* mqtt_server = "broker.hivemq.com";
+const int mqtt_port = 1883;
+
+const char* topico_comando = "fag/iot/porta/comando";
+const char* topico_status  = "fag/iot/porta/status";
+
+// --- PINOS DO HARDWARE ---
+const int PINO_SERVO   = 13;
+const int PINO_LED_VD  = 2; // LED Verde (Porta Aberta)
+const int PINO_LED_VM  = 4; // LED Vermelho (Porta Fechada)
+
+// --- ÂNGULOS DA PORTA LATERAL ---
+const int ANGULO_FECHADA = 0;
+const int ANGULO_ABERTA  = 180;
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+Servo portaServo;
+
+bool portaAberta = false;
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(PINO_LED_VD, OUTPUT);
+  pinMode(PINO_LED_VM, OUTPUT);
+
+  portaServo.attach(PINO_SERVO);
+  fecharPorta("INICIALIZACAO");
+
+  conectarWiFi();
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callbackMQTT);
+}
+
+void conectarWiFi() {
+  Serial.print("Conectando ao Wi-Fi");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi conectado! IP: " + WiFi.localIP().toString());
+}
+
+void reconectarMQTT() {
+  while (!client.connected()) {
+    Serial.print("Conectando ao Broker MQTT...");
+    String clientId = "ESP32_Porta_" + String(random(0xffff), HEX);
+    if (client.connect(clientId.c_str())) {
+      Serial.println("Conectado!");
+      client.subscribe(topico_comando);
+      publicarStatus("CONEXAO_MQTT");
+    } else {
+      Serial.print("Falha, rc=");
+      Serial.print(client.state());
+      Serial.println(" Tentando novamente em 5 segundos...");
+      delay(5000);
+    }
+  }
+}
+
+// Recebe comandos remotos via Wi-Fi/MQTT
+void callbackMQTT(char* topic, byte* payload, unsigned int length) {
+  String mensagem = "";
+  for (unsigned int i = 0; i < length; i++) {
+    mensagem += (char)payload[i];
+  }
+  mensagem.trim();
+  Serial.println("Comando MQTT recebido: " + mensagem);
+
+  if (mensagem == "ABRIR" || mensagem == "Abrir" || mensagem == "abrir") {
+    abrirPorta("COMANDO_REMOTO_MQTT");
+  } else if (mensagem == "FECHAR" || mensagem == "Fechar" || mensagem == "fechar") {
+    fecharPorta("COMANDO_REMOTO_MQTT");
+  }
+}
+
+void abrirPorta(String origem) {
+  if (!portaAberta) {
+    for(int i = 0; i < ANGULO_ABERTA; i++){
+      portaServo.write(i);
+      delay(15);
+    }
+    portaAberta = true;
+    digitalWrite(PINO_LED_VD, HIGH);
+    digitalWrite(PINO_LED_VM, LOW);
+    Serial.println("Porta ABERTA!");
+    publicarStatus(origem);
+  }
+}
+
+void fecharPorta(String origem) {
+  if (portaAberta || origem == "INICIALIZACAO") {
+    for(int i = 180; i > ANGULO_FECHADA; i--){
+      portaServo.write(i);
+      delay(15);
+    }
+    portaAberta = false;
+    digitalWrite(PINO_LED_VD, LOW);
+    digitalWrite(PINO_LED_VM, HIGH);
+    Serial.println("Porta FECHADA!");
+    publicarStatus(origem);
+  }
+}
+
+void publicarStatus(String origem) {
+  if (!client.connected()) return;
+
+  StaticJsonDocument<256> doc;
+  doc["dispositivo"] = "esp32_porta_lateral";
+  doc["estado_porta"] = portaAberta ? "ABERTA" : "FECHADA";
+  doc["origem_acao"] = origem;
+
+  char buffer[256];
+  serializeJson(doc, buffer);
+  client.publish(topico_status, buffer);
+}
+
+void loop() {
+  if (!client.connected()) {
+    reconectarMQTT();
+  }
+  client.loop();
+}
